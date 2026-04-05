@@ -9,6 +9,14 @@ on:
       scanners:
         required: true
         type: string
+      skip_dirs:
+        required: false
+        type: string
+        default: ""
+      skip_files:
+        required: false
+        type: string
+        default: ""
 
 jobs:
   trivy:
@@ -25,3 +33,5 @@ jobs:
           severity: HIGH,CRITICAL
           ignore-unfixed: true
           exit-code: "1"
+          skip-dirs: ${{ inputs.skip_dirs }}
+          skip-files: ${{ inputs.skip_files }}
