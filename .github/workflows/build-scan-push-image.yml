@@ -136,7 +136,5 @@ jobs:
         run: |
           set -euo pipefail
 
-          docker push "${{ steps.meta.outputs.ghcr_repository }}:${{ steps.meta.outputs.latest_tag }}"
           docker push "${{ steps.meta.outputs.ghcr_repository }}:${{ steps.meta.outputs.sha_tag }}"
-          docker push "${ECR_REPOSITORY}:${{ steps.meta.outputs.latest_tag }}"
           docker push "${ECR_REPOSITORY}:${{ steps.meta.outputs.sha_tag }}"
