@@ -95,11 +95,10 @@ jobs:
           file: ${{ inputs.dockerfile }}
           load: true
           push: false
+          platforms: linux/amd64, linux/arm64
           tags: |
             ${{ steps.meta.outputs.local_tag }}
-            ${{ steps.meta.outputs.ghcr_repository }}:${{ steps.meta.outputs.latest_tag }}
             ${{ steps.meta.outputs.ghcr_repository }}:${{ steps.meta.outputs.sha_tag }}
-            ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ inputs.aws_region }}.amazonaws.com/${{ steps.meta.outputs.image_name }}:${{ steps.meta.outputs.latest_tag }}
             ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ inputs.aws_region }}.amazonaws.com/${{ steps.meta.outputs.image_name }}:${{ steps.meta.outputs.sha_tag }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
