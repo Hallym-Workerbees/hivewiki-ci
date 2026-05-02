@@ -1,0 +1,140 @@
+name: Reusable Build, Scan, and Push Image
+
+on:
+  workflow_call:
+    inputs:
+      image_name:
+        required: false
+        type: string
+        default: ""
+      dockerfile:
+        required: false
+        type: string
+        default: ./Dockerfile
+      context:
+        required: false
+        type: string
+        default: .
+      aws_region:
+        required: false
+        type: string
+        default: ap-northeast-2
+    secrets:
+      AWS_ACCESS_KEY_ID:
+        required: true
+      AWS_SECRET_ACCESS_KEY:
+        required: true
+      AWS_ACCOUNT_ID:
+        required: true
+      GHCR_TOKEN:
+        required: true
+
+jobs:
+  build-scan-push:
+    name: Build, scan, and push image
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - name: Checkout caller repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Set image metadata
+        id: meta
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          repository_name="${GITHUB_REPOSITORY##*/}"
+          raw_image_name="${{ inputs.image_name }}"
+          if [[ -z "${raw_image_name}" ]]; then
+            raw_image_name="${repository_name}"
+          fi
+          image_name="${raw_image_name,,}"
+          ghcr_owner="${GITHUB_REPOSITORY_OWNER,,}"
+
+          short_sha="${GITHUB_SHA::7}"
+
+          case "${GITHUB_REF_NAME}" in
+            develop)
+              environment="dev"
+              ;;
+            main)
+              environment="prod"
+              ;;
+            *)
+              echo "Unsupported branch: ${GITHUB_REF_NAME}" >&2
+              exit 1
+              ;;
+          esac
+
+          ghcr_repository="ghcr.io/${ghcr_owner}/${image_name}"
+
+          {
+            echo "image_name=${image_name}"
+            echo "short_sha=${short_sha}"
+            echo "environment=${environment}"
+            echo "ghcr_repository=${ghcr_repository}"
+            echo "local_tag=${image_name}:${environment}-${short_sha}"
+            echo "latest_tag=${environment}-latest"
+            echo "sha_tag=${environment}-${short_sha}"
+          } >> "${GITHUB_OUTPUT}"
+
+      - name: Set up Docker Buildx
+        uses: docker/4d04d5d9486b7bd6fa91e7baf45bbb4f8b9deedd # v4.0.0
+
+      - name: Build image locally with GitHub Actions cache
+        uses: docker/build-push-action@bcafcacb16a39f128d818304e6c9c0c18556b85f # v7.1.0
+        with:
+          context: ${{ inputs.context }}
+          file: ${{ inputs.dockerfile }}
+          load: true
+          push: false
+          tags: |
+            ${{ steps.meta.outputs.local_tag }}
+            ${{ steps.meta.outputs.ghcr_repository }}:${{ steps.meta.outputs.latest_tag }}
+            ${{ steps.meta.outputs.ghcr_repository }}:${{ steps.meta.outputs.sha_tag }}
+            ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ inputs.aws_region }}.amazonaws.com/${{ steps.meta.outputs.image_name }}:${{ steps.meta.outputs.latest_tag }}
+            ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ inputs.aws_region }}.amazonaws.com/${{ steps.meta.outputs.image_name }}:${{ steps.meta.outputs.sha_tag }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Scan local image with Trivy
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: ${{ steps.meta.outputs.local_tag }}
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true
+          exit-code: "1"
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@4907a6ddec9925e35a0a9e82d7399ccc52663121 # v4.1.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GHCR_TOKEN }}
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@ec61189d14ec14c8efccab744f656cffd0e33f37 # v6.1.0
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ inputs.aws_region }}
+
+      - name: Log in to Amazon ECR
+        uses: aws-actions/amazon-ecr-login@19d944daaa35f0fa1d3f7f8af1d3f2e5de25c5b7 # v2.1.4
+
+      - name: Push image to GHCR and Amazon ECR
+        shell: bash
+        env:
+          ECR_REPOSITORY: ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ inputs.aws_region }}.amazonaws.com/${{ steps.meta.outputs.image_name }}
+        run: |
+          set -euo pipefail
+
+          docker push "${{ steps.meta.outputs.ghcr_repository }}:${{ steps.meta.outputs.latest_tag }}"
+          docker push "${{ steps.meta.outputs.ghcr_repository }}:${{ steps.meta.outputs.sha_tag }}"
+          docker push "${ECR_REPOSITORY}:${{ steps.meta.outputs.latest_tag }}"
+          docker push "${ECR_REPOSITORY}:${{ steps.meta.outputs.sha_tag }}"
