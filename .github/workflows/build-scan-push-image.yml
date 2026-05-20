@@ -30,6 +30,8 @@ on:
         required: true
       GHCR_TOKEN:
         required: true
+      SLACK_WEBHOOK_URL:
+        required: true
 
 jobs:
   build-scan-push:
@@ -137,3 +139,77 @@ jobs:
 
           docker push "${{ steps.meta.outputs.ghcr_repository }}:${{ steps.meta.outputs.sha_tag }}"
           docker push "${ECR_REPOSITORY}:${{ steps.meta.outputs.sha_tag }}"
+
+      - name: Notify Slack
+        if: always()
+        shell: bash
+        continue-on-error: true
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+          JOB_STATUS: ${{ job.status }}
+          REPOSITORY: ${{ github.repository }}
+          BRANCH: ${{ github.ref_name }}
+          IMAGE_NAME: ${{ steps.meta.outputs.image_name }}
+          ENVIRONMENT: ${{ steps.meta.outputs.environment }}
+          IMAGE_TAG: ${{ steps.meta.outputs.sha_tag }}
+          GITHUB_ACTOR: ${{ github.actor }}
+          RUN_URL: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+
+          if [[ "${JOB_STATUS}" == "success" ]]; then
+            status_text="success"
+            status_emoji=":white_check_mark:"
+          else
+            status_text="failure"
+            status_emoji=":x:"
+          fi
+
+          payload="$(
+            jq -n \
+              --arg text "${status_emoji} Docker image build ${status_text}: ${REPOSITORY}" \
+              --arg status "${status_emoji} ${status_text}" \
+              --arg repository "${REPOSITORY}" \
+              --arg branch "${BRANCH}" \
+              --arg image_name "${IMAGE_NAME:-unknown}" \
+              --arg environment "${ENVIRONMENT:-unknown}" \
+              --arg image_tag "${IMAGE_TAG:-unknown}" \
+              --arg actor "${GITHUB_ACTOR}" \
+              --arg run_url "${RUN_URL}" \
+              '{
+                text: $text,
+                blocks: [
+                  {
+                    type: "section",
+                    text: {
+                      type: "mrkdwn",
+                      text: "*Docker image build result*\n*Status:* \($status)"
+                    }
+                  },
+                  {
+                    type: "section",
+                    fields: [
+                      { type: "mrkdwn", text: "*Repository:*\n\($repository)" },
+                      { type: "mrkdwn", text: "*Branch:*\n\($branch)" },
+                      { type: "mrkdwn", text: "*Image:*\n\($image_name)" },
+                      { type: "mrkdwn", text: "*Environment:*\n\($environment)" },
+                      { type: "mrkdwn", text: "*Image tag:*\n\($image_tag)" },
+                      { type: "mrkdwn", text: "*Actor:*\n\($actor)" }
+                    ]
+                  },
+                  {
+                    type: "section",
+                    text: {
+                      type: "mrkdwn",
+                      text: "<\($run_url)|View GitHub Actions run>"
+                    }
+                  }
+                ]
+              }'
+          )"
+
+          curl --fail --silent --show-error \
+            --request POST \
+            --header "Content-Type: application/json" \
+            --data "${payload}" \
+            "${SLACK_WEBHOOK_URL}"
