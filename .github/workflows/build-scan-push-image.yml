@@ -43,6 +43,14 @@ jobs:
       packages: write
 
     steps:
+      - name: Record workflow start time
+        id: workflow_start
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          echo "epoch_seconds=$(date +%s)" >> "${GITHUB_OUTPUT}"
+
       - name: Checkout caller repository
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
@@ -154,6 +162,7 @@ jobs:
           IMAGE_TAG: ${{ steps.meta.outputs.sha_tag }}
           GITHUB_ACTOR: ${{ github.actor }}
           RUN_URL: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          WORKFLOW_STARTED_AT: ${{ steps.workflow_start.outputs.epoch_seconds }}
         run: |
           set -euo pipefail
 
@@ -165,10 +174,29 @@ jobs:
             status_emoji=":x:"
           fi
 
+          now="$(date +%s)"
+          duration_seconds=$((now - WORKFLOW_STARTED_AT))
+          if (( duration_seconds < 0 )); then
+            duration_seconds=0
+          fi
+
+          hours=$((duration_seconds / 3600))
+          minutes=$(((duration_seconds % 3600) / 60))
+          seconds=$((duration_seconds % 60))
+
+          if (( hours > 0 )); then
+            duration="${hours}h ${minutes}m ${seconds}s"
+          elif (( minutes > 0 )); then
+            duration="${minutes}m ${seconds}s"
+          else
+            duration="${seconds}s"
+          fi
+
           payload="$(
             jq -n \
               --arg text "${status_emoji} Docker image build ${status_text}: ${REPOSITORY}" \
               --arg status "${status_emoji} ${status_text}" \
+              --arg duration "${duration}" \
               --arg repository "${REPOSITORY}" \
               --arg branch "${BRANCH}" \
               --arg image_name "${IMAGE_NAME:-unknown}" \
@@ -183,7 +211,7 @@ jobs:
                     type: "section",
                     text: {
                       type: "mrkdwn",
-                      text: "*Docker image build result*\n*Status:* \($status)"
+                      text: "*Docker image build result*\n*Status:* \($status)\n*Duration:* \($duration)"
                     }
                   },
                   {
