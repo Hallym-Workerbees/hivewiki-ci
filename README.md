@@ -1,5 +1,7 @@
 # HiveWiki CI
 
+🏆 2026학년도 1학기 한림대학교 SW캡스톤디자인 경진대회 금상 수상 프로젝트
+
 HiveWiki CI는 HiveWiki 프로젝트에서 공통으로 사용하는 GitHub Actions reusable workflow를 관리하는 레포지토리입니다.
 각 서비스 레포지토리는 이 레포지토리의 workflow를 호출해 컨테이너 이미지 빌드, 보안 스캔, 이미지 푸시, Slack 알림 같은 반복적인 CI 작업을 같은 방식으로 실행할 수 있습니다.
 
